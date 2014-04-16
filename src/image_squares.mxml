@@ -6,6 +6,7 @@
 	<fx:Script>
 		<![CDATA[
 			import com.poisontaffy.libs.flex4.PTFlex4Utils;
+			
 			import flash.events.Event;
 			import flash.filesystem.File;
 			
@@ -37,26 +38,21 @@
 			}
 			
 			private function loadImage(img:File, cb:Function):Boolean {
-				var ext:String = img.extension.toLowerCase();
-				if (img.exists && img.isDirectory == false && (ext == "jpg" || ext == "png" || ext == "tiff"))
-				{
-					try {
-						var stream:FileStream = new FileStream();
-						stream.open(img, FileMode.READ);
-						var ba:ByteArray = new ByteArray();
-						stream.readBytes(ba, 0, stream.bytesAvailable);
-						var loader:Loader = new Loader();
-						var data:Object = {loader:loader, ba:ba, name:img.name};
-						loader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, cb);
-						loader.contentLoaderInfo.addEventListener(Event.COMPLETE,  cb);
-						loader.loadBytes(ba);
-						stream.close();
-						return true;
-					}catch (e:Error) {
-						return false;
-					}
-				} else {
-					
+				try {
+					var stream:FileStream = new FileStream();
+					stream.open(img, FileMode.READ);
+					var ba:ByteArray = new ByteArray();
+					stream.readBytes(ba, 0, stream.bytesAvailable);
+					var loader:Loader = new Loader();
+					var data:Object = {loader:loader, ba:ba, name:img.name};
+					loader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, cb);
+					loader.contentLoaderInfo.addEventListener(Event.COMPLETE,  cb);
+					loader.loadBytes(ba);
+					stream.close();
+					return true;
+				}catch (e:Error) {
+					logger("Failed loading file "+img.nativePath);
+					cb();
 					return false;
 				}
 				return false;
@@ -66,8 +62,17 @@
 			{
 				reset();
 				var file:File = new File(sourceLabel.text);
-				m_files = file.getDirectoryListing();
-				m_toLoad = new Array();
+				m_files = [];
+				var _files:Array = file.getDirectoryListing(); 
+				for (var i:int=0; i<_files.length; i++) {
+					var img:File = _files[i];
+					var ext:String = img.extension.toLowerCase();
+					if (img.exists && img.isDirectory == false && (ext=="jpeg" || ext == "jpg" || ext == "png" || ext == "tiff")) {
+						m_files.push(img);
+					} else {
+						logger("Skipping file "+img.nativePath);
+					}
+				}
 				/*
 				for (var i:int=0; i<m_files.length; i++)
 				{
@@ -146,7 +151,7 @@
 						break;
 					}
 				}
-				m_offsetX+=m_pixelsPerImage;
+				m_offsetX+=m_pixelsPerImage+m_files.length-1;
 				return done;
 			}
 			
@@ -158,10 +163,12 @@
 				var tx:int;
 				var ty:int;
 				var done:Boolean = false;
+				trace(m_squareNum);
 				var squareX:int = (m_squareNum%m_squaresPerLine)*m_pixelsPerImage;
 				var squareY:int = Math.floor(m_squareNum/m_squaresPerLine)*m_pixelsPerImage;
 				for (var i:int=0; i<m_pixelsPerImage; i++)
 				{
+					if (done) break;
 					for (var j:int=0; j<m_pixelsPerImage; j++)
 					{
 						_x = squareX + i;
@@ -174,11 +181,16 @@
 						if (ty+m_deltaY-j>=m_finalImage.height)
 						{
 							done = true;
+							
 							break;
 						}
 					}
 				}
-				m_squareNum++;
+				if (done) {
+					m_squareNum = m_offsetX+1;
+				} else {
+					m_squareNum+=m_files.length;
+				}
 				return done;
 			}
 			
@@ -234,25 +246,59 @@
 			{
 				m_pixelsPerImage = Number(pixelPerImage.text);
 				m_squaresPerLine = Math.floor(m_finalImage.width / m_pixelsPerImage);
-				var actionFunc:Function = function():void {
-					if (m_done) {
-						image.source = m_finalImage;
-						saveButton.enabled = true;
+				image.source = m_finalImage;
+				var offset:int = 0;
+				var runCount:int = 0;
+				var loadImageFn:Function = function(index:int, cb:Function):void {
+					if (index==m_files.length) {
+						cb(null);
+						return;
 					}
-					loadImage(m_files[m_curImageIndex], function(ev:Event):void {
-						if (!(ev is IOErrorEvent)) {
-							var bmpd:BitmapData = new BitmapData(ev.target.width, ev.target.height, false);
-							bmpd.draw(ev.target.content);
-							process(bmpd);
+					loadImage(m_files[index], function(ev:Event):void {
+						if (ev==null) {
+							cb(null);
+							return;
 						}
-						m_curImageIndex++;
-						if (m_curImageIndex>=m_toLoad.length) {
-							m_curImageIndex = 0;
-						}
-						setTimeout(actionFunc, 10);
+						var bmpd:BitmapData = new BitmapData(ev.target.width, ev.target.height, false);
+						bmpd.draw(ev.target.content);
+						cb(bmpd);
 					});
 				};
-				actionFunc();
+				var activeBmpd:BitmapData;
+				var actionFunc:Function = function():void {
+					if (offset==m_files.length) {
+						logger("Done");
+						image.source = m_finalImage;
+						
+						saveButton.enabled = true;
+						return;
+					}
+					var frames:int = 2000;
+					if (activeBmpd!=null) {
+						while (!m_done) {
+							process(activeBmpd);
+							/*
+							if (--frames<=0) {
+								setTimeout(actionFunc, 0);
+								return;
+							}
+							*/
+						}
+					}
+					//logger("Finished image "+offset);
+					offset++;
+					m_offsetX = offset;
+					runCount = 0;
+					m_done = false;
+					loadImageFn(offset, function(bmpd:BitmapData):void {
+						activeBmpd = bmpd;
+						setTimeout(actionFunc, 100);
+					});
+				};
+				loadImageFn(offset, function(bmpd:BitmapData):void {
+					activeBmpd = bmpd;
+					setTimeout(actionFunc, 100);
+				});
 			}
 			
 			private function logger(text:String):void
@@ -308,16 +354,17 @@
 			<s:CheckBox label="Centered" id="m_centered" selected="false"/>
 			<s:HGroup>
 				<s:Label text="Ancho:"/>
-				<s:TextInput id="widthInput" change="onDimChange();" text="100"/>
+				<s:TextInput id="widthInput" change="onDimChange();" text="3000"/>
 			</s:HGroup>
 			<s:HGroup>
 				<s:Label text="Altura:"/>
-				<s:TextInput id="heightInput" change="onDimChange();" text="100"/>
+				<s:TextInput id="heightInput" change="onDimChange();" text="2000"/>
 			</s:HGroup>
 			<s:Button id="saveButton" label="Guardar Imagen" click="saveImage();" enabled="false"/>
 			<s:Button label="RUN" id="runButton" click="run();"/>
 		</s:VGroup>
+		<s:TextArea width="100%" height="50" id="log"/>
 		<s:Image id="image"/>
-		<s:TextArea width="100%" height="100%" id="log"/>
+		
 	</s:VGroup>
 </s:WindowedApplication>
