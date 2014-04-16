@@ -6,6 +6,8 @@
 	<fx:Script>
 		<![CDATA[
 			import com.poisontaffy.libs.flex4.PTFlex4Utils;
+			import flash.events.Event;
+			import flash.filesystem.File;
 			
 			import mx.events.FileEvent;
 			import mx.graphics.codec.PNGEncoder;
@@ -34,15 +36,42 @@
 				m_curImageIndex = 0;
 			}
 			
+			private function loadImage(img:File, cb:Function):Boolean {
+				var ext:String = img.extension.toLowerCase();
+				if (img.exists && img.isDirectory == false && (ext == "jpg" || ext == "png" || ext == "tiff"))
+				{
+					try {
+						var stream:FileStream = new FileStream();
+						stream.open(img, FileMode.READ);
+						var ba:ByteArray = new ByteArray();
+						stream.readBytes(ba, 0, stream.bytesAvailable);
+						var loader:Loader = new Loader();
+						var data:Object = {loader:loader, ba:ba, name:img.name};
+						loader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, cb);
+						loader.contentLoaderInfo.addEventListener(Event.COMPLETE,  cb);
+						loader.loadBytes(ba);
+						stream.close();
+						return true;
+					}catch (e:Error) {
+						return false;
+					}
+				} else {
+					
+					return false;
+				}
+				return false;
+			}
+			
 			private function run():void
 			{
 				reset();
 				var file:File = new File(sourceLabel.text);
 				m_files = file.getDirectoryListing();
 				m_toLoad = new Array();
+				/*
 				for (var i:int=0; i<m_files.length; i++)
 				{
-					var img:File = m_files[i];
+					var img:File = filesCopy[i];
 					var ext:String = img.extension.toLowerCase();
 					if (img.exists && img.isDirectory==false && (ext=="jpg" || ext=="png" || ext=="tiff"))
 					{
@@ -67,14 +96,12 @@
 						}
 					}
 				}
-				if (m_toLoad.length>0)
-				{
-					m_totalImages = m_toLoad.length;
-					var dimx:int = Number(widthInput.text);
-					var dimy:int = Number(heightInput.text);
-					m_finalImage = new BitmapData(dimx, dimy, false);
-					m_finalImage.floodFill(0, 0, 0x000000);
-				}
+				*/
+				var dimx:int = Number(widthInput.text);
+				var dimy:int = Number(heightInput.text);
+				m_finalImage = new BitmapData(dimx, dimy, false);
+				m_finalImage.floodFill(0, 0, 0x000000);
+				startProcess();
 			}
 			
 			private function onLoad(ev:Event):void
@@ -206,22 +233,26 @@
 			private function startProcess(finish:Boolean = false):void
 			{
 				m_pixelsPerImage = Number(pixelPerImage.text);
-				m_squaresPerLine = Math.floor(m_finalImage.width/m_pixelsPerImage);
-				while (!m_done)
-				{
-					var data:Object = m_toLoad[m_curImageIndex];
-					if (data.bmpd)
-					{
-						process(data.bmpd);
+				m_squaresPerLine = Math.floor(m_finalImage.width / m_pixelsPerImage);
+				var actionFunc:Function = function():void {
+					if (m_done) {
+						image.source = m_finalImage;
+						saveButton.enabled = true;
 					}
-					m_curImageIndex++;
-					if (m_curImageIndex>=m_toLoad.length)
-					{
-						m_curImageIndex = 0;
-					}
-				}
-				image.source = m_finalImage;
-				saveButton.enabled = true;
+					loadImage(m_files[m_curImageIndex], function(ev:Event):void {
+						if (!(ev is IOErrorEvent)) {
+							var bmpd:BitmapData = new BitmapData(ev.target.width, ev.target.height, false);
+							bmpd.draw(ev.target.content);
+							process(bmpd);
+						}
+						m_curImageIndex++;
+						if (m_curImageIndex>=m_toLoad.length) {
+							m_curImageIndex = 0;
+						}
+						setTimeout(actionFunc, 10);
+					});
+				};
+				actionFunc();
 			}
 			
 			private function logger(text:String):void
@@ -259,12 +290,12 @@
 		<!-- Place non-visual elements (e.g., services, value objects) here -->
 	</fx:Declarations>
 	<s:VGroup>
-		<s:TextInput id="sourceLabel" width="500" text="/Users/applicaster/desktop/1"/>
+		<s:TextInput id="sourceLabel" width="500" text="/Users/lilianafarber/desktop/1"/>
 		<s:VGroup>
 			<s:HGroup>
 				<s:HGroup>
 					<s:Label text="Pixel #:"/>
-					<s:TextInput id="pixelPerImage" text="4"/>
+					<s:TextInput id="pixelPerImage" text="1"/>
 				</s:HGroup>
 				<s:HGroup>
 					<s:Label text="Mode:"/>
