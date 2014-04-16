@@ -1,0 +1,418 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"
+					   xmlns:s="library://ns.adobe.com/flex/spark"
+					   xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="windowedapplication1_creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.poisontaffy.libs.flex4.PTFlex4Utils;
+			
+			import flash.utils.getTimer;
+			import flash.utils.setTimeout;
+			
+			import mx.events.FlexEvent;
+			import mx.graphics.codec.JPEGEncoder;
+			import mx.graphics.codec.PNGEncoder;
+
+			private var m_time			:uint;
+			private var m_finalImage	:BitmapData;
+			private var m_toLoad		:Array;
+			private var m_curImageIndex :int;
+			private var m_totalImages	:int;
+			private var m_deltaX		:int = 0;
+			private var m_deltaY		:int = 0;
+			private var m_utils			:PTFlex4Utils = new PTFlex4Utils();
+			private var m_textOutput	:Object;
+			private var m_outputStream	:FileStream;
+
+			protected function windowedapplication1_creationCompleteHandler(event:FlexEvent):void
+			{
+
+				sourceLabel.text = "/Users/applicaster/desktop/1";//File.applicationStorageDirectory.nativePath;
+			}
+			
+			private function centerImage(image:BitmapData):void
+			{
+				if (!m_centered.selected)
+				{
+					m_deltaX = 0;
+					m_deltaY = 0;
+				}
+				else
+				{
+					m_deltaX = m_finalImage.width - image.width;
+					m_deltaY = m_finalImage.height - image.height;
+					if (m_deltaX>0)
+					{
+						m_deltaX = Math.floor(m_deltaX/2);
+					}
+					else
+					{
+						m_deltaX = 0;
+					}
+					if (m_deltaY>0)
+					{
+						m_deltaY = Math.floor(m_deltaY/2);
+					}
+					else
+					{
+						m_deltaY = 0;
+					}
+				}
+			}
+
+			private function rgbaverageNoOverflowData(pic:BitmapData):void
+			{
+				var dimension:String;
+				var output:String;
+				var sourcePixel:uint;
+				var targetPixel:uint;
+				var rs:uint;
+				var gs:uint;
+				var bs:uint;
+				var rt:uint;
+				var gt:uint;
+				var bt:uint;
+				for (var _x:int=0; _x<m_finalImage.width; _x++)
+				{
+					for (var _y:int=0; _y<m_finalImage.height; _y++)
+					{
+
+						sourcePixel = pic.getPixel(_x,_y);
+						targetPixel = m_finalImage.getPixel(_x+m_deltaX, _y+m_deltaY);
+						rs = ((sourcePixel>>16) & 0xff);
+						gs = ((sourcePixel>>8) & 0xff);
+						bs = (sourcePixel & 0xff);
+						dimension = m_curImageIndex+"/"+_x+"/"+_y;
+						output = "r"+dimension+":\t"+rs+"\tg"+dimension+":\t"+gs+"\tb"+dimension+":\t"+bs+"\n";
+						rt = ((targetPixel>>16) & 0xff);
+						gt = ((targetPixel>>8) & 0xff);
+						bt = (targetPixel & 0xff);
+						rs = Math.round(rs/m_totalImages) + rt;
+						gs = Math.round(gs/m_totalImages) + gt;
+						bs = Math.round(bs/m_totalImages) + bt;
+						rs = rs>255?255:rs;
+						gs = gs>255?255:gs;
+						bs = bs>255?255:bs;
+						sourcePixel = rs<<16 | gs<<8 | bs;
+						m_finalImage.setPixel(_x+m_deltaX,_y+m_deltaY, sourcePixel);
+						m_outputStream.writeUTFBytes(output);
+					}
+				}
+				loadNext();
+			}
+			
+			private function rgbaverageNoOverflowNoData(pic:BitmapData):void
+			{
+				for (var _x:int=0; _x<m_finalImage.width; _x++)
+				{
+					for (var _y:int=0; _y<m_finalImage.height; _y++)
+					{
+						
+						var sourcePixel:uint = pic.getPixel(_x,_y);
+						var targetPixel:uint = m_finalImage.getPixel(_x+m_deltaX, _y+m_deltaY);
+						var rs:uint = ((sourcePixel>>16) & 0xff);
+						var gs:uint = ((sourcePixel>>8) & 0xff);
+						var bs:uint = (sourcePixel & 0xff);
+						var rt:uint = ((targetPixel>>16) & 0xff);
+						var gt:uint = ((targetPixel>>8) & 0xff);
+						var bt:uint = (targetPixel & 0xff);
+						rs = Math.round(rs/m_totalImages) + rt;
+						gs = Math.round(gs/m_totalImages) + gt;
+						bs = Math.round(bs/m_totalImages) + bt;
+						rs = rs>255?255:rs;
+						gs = gs>255?255:gs;
+						bs = bs>255?255:bs;
+						sourcePixel = rs<<16 | gs<<8 | bs;
+						m_finalImage.setPixel(_x+m_deltaX,_y+m_deltaY, sourcePixel);
+					}
+				}
+				loadNext();
+			}
+			private var rs:uint;
+			private var gs:uint;
+			private var bs:uint;
+			private function rgbDownSample(pic:BitmapData, args:Array):void
+			{
+				for (var _x:int=0; _x<m_finalImage.width; _x++)
+				{
+					for (var _y:int=0; _y<m_finalImage.height; _y++)
+					{
+						
+						var sourcePixel:uint = pic.getPixel(_x,_y);
+						var targetPixel:uint = m_finalImage.getPixel(_x+m_deltaX, _y+m_deltaY);
+						rs = ((sourcePixel>>16) & 0xff);
+						gs = ((sourcePixel>>8) & 0xff);
+						bs = (sourcePixel & 0xff);
+						var rt:uint = ((targetPixel>>16) & 0xff);
+						var gt:uint = ((targetPixel>>8) & 0xff);
+						var bt:uint = (targetPixel & 0xff);
+						var oneDim:Number = this[args[1]]+this[args[2]];
+						bs = rs = gs = this[args[0]]*255/oneDim;
+						rs = rs>255?255:rs;
+						gs = gs>255?255:gs;
+						bs = bs>255?255:bs;
+						sourcePixel = rs<<16 | gs<<8 | bs;
+						m_finalImage.setPixel(_x+m_deltaX,_y+m_deltaY, sourcePixel);
+					}
+				}
+				loadNext(true);
+			}
+
+			private function writeFinalValues():void
+			{
+				var dimension:String;
+				var output:String;
+				if (m_outputStream)
+				{
+					for (var _x:int=0; _x<m_finalImage.width; _x++)
+					{
+						for (var _y:int=0; _y<m_finalImage.height; _y++)
+						{
+							var targetPixel:uint = m_finalImage.getPixel(_x, _y);
+							var rt:uint = ((targetPixel>>16) & 0xff);
+							var gt:uint = ((targetPixel>>8) & 0xff);
+							var bt:uint = (targetPixel & 0xff);
+							dimension = "f/"+_x+"/"+_y;
+							output = "r"+dimension+":\t"+rt+"\tg"+dimension+":\t"+gt+"\tb"+dimension+":\t"+bt+"\n";
+							m_outputStream.writeUTFBytes(output);
+						}
+					}
+				}
+			}
+
+			protected function button1_clickHandler(event:MouseEvent):void
+			{
+				m_curImageIndex = 0;
+				m_time = getTimer();
+				m_toLoad = new Array();
+				// TODO Auto-generated method stub
+				var file:File = new File(sourceLabel.text);
+				logger("Trying to load from "+file.nativePath+"(folder:"+file.isDirectory+" exists:"+file.exists+")");
+				var files:Array = file.getDirectoryListing();
+				logger("Found "+files.length+" files in the directory");
+				m_totalImages = 0;
+				saveButton.enabled = false;
+				saveDataButton.enabled = false;
+				for (var i:int=0; i<files.length; i++)
+				{
+					var img:File = files[i];
+					var ext:String = img.extension.toLowerCase();
+					if (img.exists && img.isDirectory==false && (ext=="jpg" || ext=="png" || ext=="tiff"))
+					{
+						logger("\tAdding "+img.nativePath);
+						try
+						{
+							var stream:FileStream = new FileStream();
+							stream.open(img, FileMode.READ);
+							var ba:ByteArray = new ByteArray();
+							stream.readBytes(ba, 0, stream.bytesAvailable);
+							var loader:Loader = new Loader();
+							loader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, onError);
+							loader.contentLoaderInfo.addEventListener(Event.COMPLETE, onLoaded);
+							m_toLoad.push({loader:loader, ba:ba, name:img.name});
+							stream.close();
+						}
+						catch(e:Error)
+						{
+							logger("Can't read file: "+e.message);
+							
+						}
+						
+					}
+				}
+				if (m_toLoad.length>0)
+				{
+					m_totalImages = m_toLoad.length;
+					try
+					{
+						logger("Initializing final image...");
+						var dimx:int = Number(widthInput.text);
+						var dimy:int = Number(heightInput.text);
+						m_finalImage = new BitmapData(dimx, dimy, false);
+						m_finalImage.floodFill(0, 0, 0x000000);
+					}
+					catch(e:Error)
+					{
+						logger("Can't create final image: "+e.message);
+					}
+					loadNext();
+				} else
+				{
+					logger("Sorry, no images to process :(");
+				}
+
+			}
+
+			private function loadNext(finish:Boolean = false):void
+			{
+				if (finish==false && m_toLoad.length){
+					var data:Object = m_toLoad.shift();
+					logger("Loading "+data.name);
+					data.loader.loadBytes(data.ba);
+				}
+				else
+				{
+					image.source = m_finalImage;
+					m_time = getTimer() - m_time;
+					logger("Completed in "+(m_time/1000)+" seconds.");
+					saveButton.enabled = true;
+					saveDataButton.enabled = true;
+					writeFinalValues();
+					if (m_outputStream)
+					{
+						m_outputStream.close();
+					}
+				}
+			}
+
+			private function onError(ev:IOErrorEvent):void
+			{
+				logger("Failed loading file: "+ev.text);
+				loadNext();
+			}
+
+			private function onLoaded(ev:Event):void
+			{
+				logger("\tProcessing... "+m_toLoad.length);
+				setTimeout(function():void{
+					try
+					{
+						m_curImageIndex++;
+						var bmpd:BitmapData = new BitmapData(ev.target.width, ev.target.height, false);
+						bmpd.draw(ev.target.content);
+						centerImage(bmpd);
+						if (m_rf.selected)
+						{
+							rgbDownSample(bmpd, ["rs", "gs", "bs"]);
+						}
+						else
+						if (m_bf.selected)
+						{
+							rgbDownSample(bmpd, ["bs", "gs", "rs"]);
+						}
+						else
+						if (m_gf.selected)
+						{
+							rgbDownSample(bmpd, ["gs", "rs", "bs"]);
+						}
+						else
+						{
+							if (m_outputStream)
+							{
+								rgbaverageNoOverflowData(bmpd);
+							}
+							else
+							{
+								rgbaverageNoOverflowNoData(bmpd);
+							}
+						}
+						bmpd.dispose();
+					}
+					catch(e:Error)
+					{
+						logger("Error making bmp: "+e.message);
+						loadNext();
+					}
+
+				}, 30);
+			}
+
+			private function logger(text:String):void
+			{
+				m_utils.scrollToBottom(log);
+				log.text += "\n"+text;
+				m_utils.scrollToBottom(log);
+			}
+
+			private function saveImage():void
+			{
+				var file:File = new File();
+				file.browseForSave("Save As");
+				file.addEventListener(Event.SELECT, function(ev:Event):void{
+					var stream:FileStream = new FileStream();
+					stream.open(file, FileMode.WRITE);
+					var jpg:PNGEncoder = new PNGEncoder();
+					stream.writeBytes(jpg.encode(m_finalImage));
+					stream.close();
+				});
+			}
+
+			private function saveData():void
+			{
+				var file:File = new File();
+				file.browseForSave("Save As");
+				file.addEventListener(Event.SELECT, function(ev:Event):void{
+					m_outputStream = new FileStream();
+					m_outputStream.open(file, FileMode.WRITE);
+				});
+			}
+			
+			private function reset():void
+			{
+				if (m_finalImage)
+				{
+					m_finalImage.dispose();
+				}
+				if (m_outputStream)
+				{
+					m_outputStream = null;
+				}
+				widthInput.text = "";
+				heightInput.text = "";
+				image.source = null;
+				runButton.enabled = false;
+				saveDataButton.enabled = false;
+				saveButton.enabled = false;
+				m_totalImages = 0;
+				log.text = "";
+			}
+			
+			private function onDimChange():void
+			{
+				if (widthInput.text!="" && heightInput.text!="")
+				{
+					runButton.enabled = true;
+				}
+			}
+
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:VGroup width="100%" height="100%">
+		<s:TextInput id="sourceLabel" width="500"/>
+		<s:HGroup paddingLeft="5">
+			<s:VGroup>
+				<s:HGroup>
+					<s:Label text="Ancho:"/>
+					<s:TextInput id="widthInput" change="onDimChange();"/>
+				</s:HGroup>
+				<s:HGroup>
+					<s:Label text="Altura:"/>
+					<s:TextInput id="heightInput" change="onDimChange();"/>
+				</s:HGroup>
+				<s:Button label="Reset" click="reset();"/>
+			</s:VGroup>
+			<s:VGroup>
+				<s:HGroup>
+					<s:Button id="runButton" label="Ejecutar" click="button1_clickHandler(event)" enabled="false"/>
+					<s:Button id="saveButton" label="Guardar Imagen" click="saveImage();" enabled="false"/>
+				</s:HGroup>
+				<s:HGroup>
+					<s:Button id="saveDataButton" label="Guardar datos" click="saveData();" enabled="false"/>
+				</s:HGroup>
+				<mx:HBox>
+					<s:RadioButton label="Regular" id="m_reg" groupName="rgb"  selected="true"/>
+					<s:RadioButton label="R formula" id="m_rf" groupName="rgb"/>
+					<s:RadioButton label="G formula" id="m_gf" groupName="rgb"/>
+					<s:RadioButton label="B formula" id="m_bf" groupName="rgb"/>
+				</mx:HBox>
+				<s:CheckBox label="Centered" id="m_centered" selected="true"/>
+			</s:VGroup>
+		</s:HGroup>
+		<s:Image id="image"/>
+		<s:TextArea width="100%" height="100%" id="log"/>
+	</s:VGroup>
+
+</s:WindowedApplication>

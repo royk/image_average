@@ -1,0 +1,405 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"
+					   xmlns:s="library://ns.adobe.com/flex/spark"
+					   xmlns:mx="library://ns.adobe.com/flex/mx" creationComplete="windowedapplication1_creationCompleteHandler(event)">
+	<fx:Script>
+		<![CDATA[
+			import com.poisontaffy.libs.flex4.PTFlex4Utils;
+			
+			import flash.utils.getTimer;
+			import flash.utils.setTimeout;
+			
+			import mx.events.FlexEvent;
+			import mx.graphics.codec.JPEGEncoder;
+			import mx.graphics.codec.PNGEncoder;
+			
+			private var m_time			:uint;
+			private var m_finalImage	:BitmapData;
+			private var m_toLoad		:Array;
+			private var m_toRelease		:Array = new Array();
+			private var m_zoomFactor		:int;
+			private var m_curImageIndex :int;
+			private var m_totalImages	:int;
+			private var m_deltaX		:uint = 0;
+			private var m_deltaY		:uint = 0;
+			private var m_utils			:PTFlex4Utils = new PTFlex4Utils();
+			private var m_textOutput	:Object;
+			private var m_outputStream	:FileStream;
+			private var m_selectedSaveFile	:File;
+			private var m_saveFile		:File;
+			private var m_saveData		:Array;
+			private var m_runs:Array = new Array();
+			private var m_i:int = 0;
+			private var m_j:int = 0;
+			private var m_files:Array = new Array();
+			private var m_loadedImages:Dictionary = new Dictionary(true);
+			private var m_imagesPerBatch:int = 0;
+			
+			protected function windowedapplication1_creationCompleteHandler(event:FlexEvent):void
+			{
+				
+				sourceLabel.text = "/Users/lilianafarber/desktop/1";//File.applicationStorageDirectory.nativePath;
+			}
+			
+			private function centerImage(image:BitmapData):void
+			{
+				if (!m_centered.selected)
+				{
+					m_deltaX = 0;
+					m_deltaY = 0;
+				}
+				else
+				{
+					m_deltaX = m_finalImage.width - image.width;
+					m_deltaY = m_finalImage.height - image.height;
+					if (m_deltaX>0)
+					{
+						m_deltaX = Math.floor(m_deltaX/2);
+					}
+					else
+					{
+						m_deltaX = 0;
+					}
+					if (m_deltaY>0)
+					{
+						m_deltaY = Math.floor(m_deltaY/2);
+					}
+					else
+					{
+						m_deltaY = 0;
+					}
+				}
+			}
+			
+			private function rgbaverageNoOverflowData(pic:BitmapData, pixels:Array = null):Array
+			{
+				var sourcePixel:uint;
+				var targetPixel:uint;
+				var rs:uint;
+				var gs:uint;
+				var bs:uint;
+				var rt:uint;
+				var gt:uint;
+				var bt:uint;
+				if (pixels==null) {
+					pixels = new Array();
+					for (var _x:uint=0; _x<m_finalImage.width; _x++)
+					{
+						for (var _y:uint=0; _y<m_finalImage.height; _y++)
+						{
+							sourcePixel = pic.getPixel(_x+m_deltaX, _y+m_deltaY);
+							targetPixel = m_finalImage.getPixel(_x+m_deltaX, _y+m_deltaY);
+							rs = Math.round(((sourcePixel>>16) & 0xff)/m_totalImages);
+							gs = Math.round(((sourcePixel>>8) & 0xff)/m_totalImages);
+							bs = Math.round((sourcePixel & 0xff)/m_totalImages);
+							pixels.push(rs,gs,bs);
+							rt = ((targetPixel>>16) & 0xff);
+							gt = ((targetPixel>>8) & 0xff);
+							bt = (targetPixel & 0xff);
+							rs = rs + rt;
+							gs = gs + gt;
+							bs = bs + bt;
+							rs = rs>255?255:rs;
+							gs = gs>255?255:gs;
+							bs = bs>255?255:bs;
+							m_finalImage.setPixel(_x+m_deltaX, _y+m_deltaY, rs<<16 | gs<<8 | bs);
+						}
+					}
+				}
+				else {
+					var i:int = 0;
+					for (var _x:uint=0; _x<m_finalImage.width; _x++)
+					{
+						for (var _y:uint=0; _y<m_finalImage.height; _y++)
+						{
+							targetPixel = m_finalImage.getPixel(_x+m_deltaX, _y+m_deltaY);
+							rs = pixels[i++];
+							gs = pixels[i++];
+							bs = pixels[i++];
+							rt = ((targetPixel>>16) & 0xff);
+							gt = ((targetPixel>>8) & 0xff);
+							bt = (targetPixel & 0xff);
+							rs = rs + rt;
+							gs = gs + gt;
+							bs = bs + bt;
+							rs = rs>255?255:rs;
+							gs = gs>255?255:gs;
+							bs = bs>255?255:bs;
+							m_finalImage.setPixel(_x+m_deltaX,_y+m_deltaY, rs<<16 | gs<<8 | bs);
+						}
+					}
+				}
+				return pixels;
+			}
+			
+			private function writeFinalValues():void
+			{
+				var dimension:String;
+				var output:String;
+				if (m_outputStream)
+				{
+					for (var _x:int=0; _x<m_finalImage.width; _x++)
+					{
+						for (var _y:int=0; _y<m_finalImage.height; _y++)
+						{
+							var targetPixel:uint = m_finalImage.getPixel(_x, _y);
+							var rt:uint = ((targetPixel>>16) & 0xff);
+							var gt:uint = ((targetPixel>>8) & 0xff);
+							var bt:uint = (targetPixel & 0xff);
+							dimension = "f/"+_x+"/"+_y;
+							output = "r"+dimension+":\t"+rt+"\tg"+dimension+":\t"+gt+"\tb"+dimension+":\t"+bt+"\n";
+							m_outputStream.writeUTFBytes(output);
+						}
+					}
+				}
+			}
+			
+			protected function run(event:MouseEvent=null):void
+			{
+				promptForSaveFile(function():void {
+					m_curImageIndex = 0;
+					m_time = getTimer();
+					m_toLoad = new Array();
+					// TODO Auto-generated method stub
+					var file:File = new File(sourceLabel.text);
+					logger("Trying to load from "+file.nativePath+"(folder:"+file.isDirectory+" exists:"+file.exists+")");
+					var files:Array = file.getDirectoryListing();
+					logger("Found "+files.length+" files in the directory");
+					m_totalImages = 0;
+					saveDataButton.enabled = false;
+					m_runs = new Array();
+					m_files = new Array();	
+					for (var i:int=0; i<files.length; i++) {
+						var img:File = files[i];
+						if (img.extension==null) {
+							continue;
+						}
+						var ext:String = img.extension.toLowerCase();
+						if (img.exists && img.isDirectory==false && (ext=="jpg" || ext=="png" || ext=="tiff"))
+						{
+							m_files.push(img);
+						}
+					}
+					m_imagesPerBatch = Math.min(m_files.length, int(m_multipleCount.text));
+					m_i = 0;
+					loadNextBatch();
+				});
+			}
+			
+			private function loadNext(finish:Boolean = false):void
+			{
+				if (m_toLoad.length==0) {
+					saveImage();
+					loadNextBatch();
+				} else {
+					var data:Object = m_toLoad.shift();
+					var curTime:int = getTimer();
+					if (data.bmpd) {
+						rgbaverageNoOverflowData(data.bmpd, data.pixels);
+						var totalTime:int = getTimer() - curTime;
+						//trace("Reuse took",totalTime);
+						loadNext();
+					} else {
+						
+						data.loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(ev:Event):void {
+							
+							m_curImageIndex++;
+							var bmpd:BitmapData = new BitmapData(ev.target.width, ev.target.height, false);
+							bmpd.draw(ev.target.content);
+							centerImage(bmpd);
+							m_zoomFactor = int(zoomFactor.text);
+							var saveData:Object = {bmpd:bmpd, name:data.name};
+							curTime = getTimer();
+							saveData.pixels = rgbaverageNoOverflowData(bmpd);
+							m_loadedImages[data.name] = saveData;
+							totalTime = getTimer() - curTime;
+							var totalTime:int = getTimer() - curTime;
+							//trace("New took",totalTime);
+							loadNext();
+						});
+						data.loader.loadBytes(data.ba);
+					}
+				}
+			}
+			
+			private function loadNextBatch():void {
+				var img:File;
+				var toKeepInLoaded:Array = new Array();
+				for (var j:int=0; j<m_imagesPerBatch; j++) {
+					var idx:int = m_i+j;
+					if (m_toLoad.length>m_imagesPerBatch || idx>m_files.length-1) {
+						break;
+					}
+					img = m_files[m_i+j];
+					logger("\tAdding "+img.nativePath);
+					try
+					{
+						var savedData:Object = m_loadedImages[img.name];
+						if (savedData==null) {
+							var stream:FileStream = new FileStream();
+							stream.open(img, FileMode.READ);
+							var ba:ByteArray = new ByteArray();
+							stream.readBytes(ba, 0, stream.bytesAvailable);
+							var loader:Loader = new Loader();
+							loader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, onError);
+							m_toLoad.push({loader:loader, ba:ba, name:img.name});
+							stream.close();
+						} else {
+							m_toLoad.push(savedData);
+						}
+						toKeepInLoaded.push(img.name);
+					}
+					catch(e:Error)
+					{
+						logger("Can't read file: "+e.message);
+						
+					}
+				}
+				for (var name:String in m_loadedImages) {
+					if (toKeepInLoaded.indexOf(name)==-1) {
+						m_loadedImages[name].bmpd.dispose();
+						delete m_loadedImages[name];
+					}
+				}
+				if (m_toLoad.length==m_imagesPerBatch) {
+					var dimx:int = Number(widthInput.text);
+					var dimy:int = Number(heightInput.text);
+					m_finalImage = new BitmapData(dimx, dimy, false);
+					m_finalImage.floodFill(0, 0, 0x000000);
+					if (m_i>0) {
+						m_saveFile = new File(m_selectedSaveFile.nativePath.replace("."+m_selectedSaveFile.extension, "_"+m_i+"."+m_selectedSaveFile.extension));
+					} else {
+						m_saveFile = new File(m_selectedSaveFile.nativePath);
+					}
+					m_totalImages = m_imagesPerBatch;
+					loadNext(false);
+				}  else {
+					// DONE!
+					var totalTime:int = getTimer() - m_time;
+					logger("\t\t ----- DONE.Took: "+totalTime);
+					saveDataButton.enabled = true;
+					writeFinalValues();
+					if (m_outputStream)
+					{
+						m_outputStream.close();
+					}
+				}
+				m_i++;
+			}
+			
+			private function onError(ev:IOErrorEvent):void
+			{
+				logger("Failed loading file: "+ev.text);
+				loadNext();
+			}
+			
+			private function logger(text:String):void
+			{
+				m_utils.scrollToBottom(log);
+				log.text += "\n"+text;
+				m_utils.scrollToBottom(log);
+			}
+			
+			private function promptForSaveFile(cb:Function):void
+			{
+				m_selectedSaveFile = new File();
+				m_selectedSaveFile.browseForSave("Save As");
+				m_selectedSaveFile.addEventListener(Event.SELECT, function(ev:Event):void{
+					cb();
+				});
+			}
+			
+			private function saveImage():void
+			{
+				var stream:FileStream = new FileStream();
+				stream.open(m_saveFile, FileMode.WRITE);
+				var jpg:PNGEncoder = new PNGEncoder();
+				stream.writeBytes(jpg.encode(m_finalImage));
+				stream.close();
+			}
+			
+			private function saveData():void
+			{
+				var file:File = new File();
+				file.browseForSave("Save As");
+				file.addEventListener(Event.SELECT, function(ev:Event):void{
+					m_outputStream = new FileStream();
+					m_outputStream.open(file, FileMode.WRITE);
+				});
+			}
+			
+			private function reset():void
+			{
+				if (m_finalImage)
+				{
+					m_finalImage.dispose();
+				}
+				if (m_outputStream)
+				{
+					m_outputStream = null;
+				}
+				widthInput.text = "";
+				heightInput.text = "";
+				image.source = null;
+				runButton.enabled = false;
+				saveDataButton.enabled = false;
+				m_totalImages = 0;
+				log.text = "";
+			}
+			
+			private function onDimChange():void
+			{
+				if (widthInput.text!="" && heightInput.text!="")
+				{
+					runButton.enabled = true;
+				}
+			}
+			
+		]]>
+	</fx:Script>
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:VGroup width="100%" height="100%">
+		<s:TextInput id="sourceLabel" width="500"/>
+		<s:HGroup paddingLeft="5">
+			<s:VGroup>
+				<s:HGroup>
+					<s:Label text="Ancho:"/>
+					<s:TextInput id="widthInput" change="onDimChange();" text="1920"/>
+				</s:HGroup>
+				<s:HGroup>
+					<s:Label text="Altura:"/>
+					<s:TextInput id="heightInput" change="onDimChange();" text="1080"/>
+				</s:HGroup>
+				<s:Button label="Reset" click="reset();"/>
+			</s:VGroup>
+			<s:VGroup>
+				<s:HGroup>
+					<s:Button id="runButton" label="Ejecutar" click="run(event)" enabled="true"/>
+				</s:HGroup>
+				<s:HGroup>
+					<s:Button id="saveDataButton" label="Guardar datos" click="saveData();" enabled="true"/>
+				</s:HGroup>
+				<mx:HBox>
+					<s:RadioButton label="Regular" id="m_reg" groupName="rgb"  selected="true"/>
+					<s:RadioButton label="R formula" id="m_rf" groupName="rgb"/>
+					<s:RadioButton label="G formula" id="m_gf" groupName="rgb"/>
+					<s:RadioButton label="B formula" id="m_bf" groupName="rgb"/>
+					<s:HGroup>
+						<s:Label text="Zoom factor:"/>
+						<s:TextInput id="zoomFactor" text="1"/>
+					</s:HGroup>
+				</mx:HBox>
+				<s:CheckBox label="Centered" id="m_centered" selected="true"/>
+				<mx:HBox>
+					<s:CheckBox label="Multiple Outputs" id="m_multiple" selected="true"/>
+					<s:TextInput id="m_multipleCount" text="100"/>
+				</mx:HBox>
+			</s:VGroup>
+		</s:HGroup>
+		<s:Image id="image"/>
+		<s:TextArea width="100%" height="100%" id="log"/>
+	</s:VGroup>
+	
+</s:WindowedApplication>

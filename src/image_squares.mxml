@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" 
+					   xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx">
+	
+	<fx:Script>
+		<![CDATA[
+			import com.poisontaffy.libs.flex4.PTFlex4Utils;
+			
+			import mx.events.FileEvent;
+			import mx.graphics.codec.PNGEncoder;
+			
+			private var m_toLoad		:Array;
+			private var m_totalImages:int = 0;
+			private var m_curImageIndex:int = 0;
+			private var m_deltaX		:int = 0;
+			private var m_deltaY		:int = 0;
+			private var m_offsetX		:int = 0;
+			private var m_squareNum		:int = 0;
+			private var m_squaresPerLine:int = 0;
+			private var m_pixelsPerImage:int = 0;
+			private var m_finalImage:BitmapData;
+			private var m_utils			:PTFlex4Utils = new PTFlex4Utils();
+			private var m_files:Array;
+			private var m_done:Boolean = false;
+			private var m_activeData:Object;
+			
+			private function reset():void
+			{
+				m_done = false;
+				m_offsetX = 0;
+				m_squareNum = 0;
+				m_squaresPerLine = 0;
+				m_curImageIndex = 0;
+			}
+			
+			private function run():void
+			{
+				reset();
+				var file:File = new File(sourceLabel.text);
+				m_files = file.getDirectoryListing();
+				m_toLoad = new Array();
+				for (var i:int=0; i<m_files.length; i++)
+				{
+					var img:File = m_files[i];
+					var ext:String = img.extension.toLowerCase();
+					if (img.exists && img.isDirectory==false && (ext=="jpg" || ext=="png" || ext=="tiff"))
+					{
+						try
+						{
+							var stream:FileStream = new FileStream();
+							stream.open(img, FileMode.READ);
+							var ba:ByteArray = new ByteArray();
+							stream.readBytes(ba, 0, stream.bytesAvailable);
+							var loader:Loader = new Loader();
+							var data:Object = {loader:loader, ba:ba, name:img.name};
+							loader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR, onError);
+							loader.contentLoaderInfo.addEventListener(Event.COMPLETE,  onLoad);
+							loader.loadBytes(ba);
+							m_toLoad.push(data);
+							stream.close();
+						}
+						catch(e:Error)
+						{
+							logger("Can't read file: "+e.message);
+							
+						}
+					}
+				}
+				if (m_toLoad.length>0)
+				{
+					m_totalImages = m_toLoad.length;
+					var dimx:int = Number(widthInput.text);
+					var dimy:int = Number(heightInput.text);
+					m_finalImage = new BitmapData(dimx, dimy, false);
+					m_finalImage.floodFill(0, 0, 0x000000);
+				}
+			}
+			
+			private function onLoad(ev:Event):void
+			{
+				for (var i:int=0; i<m_toLoad.length; i++)
+				{
+					var o:Object = m_toLoad[i];
+					if (o.loader.contentLoaderInfo==ev.target)
+					{
+						var bmpd:BitmapData = new BitmapData(ev.target.width, ev.target.height, false);
+						bmpd.draw(ev.target.content);
+						o.bmpd = bmpd;
+						if (--m_totalImages==0)
+						{
+							startProcess();
+						}	
+					}
+					
+				}
+			}
+			
+			private function readPixels(image:BitmapData):Boolean
+			{
+				var _y:int;
+				var _x:int;
+				var sourcePixel:uint;
+				var tx:int;
+				var ty:int;
+				var done:Boolean = false;
+				for (var i:int=0; i<m_pixelsPerImage; i++)
+				{
+					_y = Math.floor((i+m_offsetX)/image.width);
+					_x = (i+m_offsetX)%image.width;
+					
+					sourcePixel = image.getPixel(_x%image.width,_y%image.height);
+					ty = Math.floor((i+m_offsetX)/m_finalImage.width);
+					tx = (i+m_offsetX)%m_finalImage.width;
+					m_finalImage.setPixel(tx+m_deltaX,ty+m_deltaY, sourcePixel);
+					if (ty+m_deltaY>=m_finalImage.height)
+					{
+						done = true;
+						break;
+					}
+				}
+				m_offsetX+=m_pixelsPerImage;
+				return done;
+			}
+			
+			private function readPixelsSquare(image:BitmapData):Boolean
+			{
+				var _y:int;
+				var _x:int;
+				var sourcePixel:uint;
+				var tx:int;
+				var ty:int;
+				var done:Boolean = false;
+				var squareX:int = (m_squareNum%m_squaresPerLine)*m_pixelsPerImage;
+				var squareY:int = Math.floor(m_squareNum/m_squaresPerLine)*m_pixelsPerImage;
+				for (var i:int=0; i<m_pixelsPerImage; i++)
+				{
+					for (var j:int=0; j<m_pixelsPerImage; j++)
+					{
+						_x = squareX + i;
+						_y = squareY + j;
+						
+						sourcePixel = image.getPixel(_x%image.width,_y%image.height);
+						tx = _x;
+						ty = _y;
+						m_finalImage.setPixel(tx+m_deltaX,ty+m_deltaY, sourcePixel);
+						if (ty+m_deltaY-j>=m_finalImage.height)
+						{
+							done = true;
+							break;
+						}
+					}
+				}
+				m_squareNum++;
+				return done;
+			}
+			
+			private function centerImage(image:BitmapData):void
+			{
+				if (!m_centered.selected)
+				{
+					m_deltaX = 0;
+					m_deltaY = 0;
+				}
+				else
+				{
+					m_deltaX = m_finalImage.width - image.width;
+					m_deltaY = m_finalImage.height - image.height;
+					if (m_deltaX>0)
+					{
+						m_deltaX = Math.floor(m_deltaX/2);
+					}
+					else
+					{
+						m_deltaX = 0;
+					}
+					if (m_deltaY>0)
+					{
+						m_deltaY = Math.floor(m_deltaY/2);
+					}
+					else
+					{
+						m_deltaY = 0;
+					}
+				}
+			}
+			
+			private function onError(ev:IOErrorEvent):void
+			{
+				logger("Failed loading file: "+ev.text);
+			}
+			
+			private function process(bmpd:BitmapData):void
+			{
+				centerImage(bmpd);
+				if (m_modeHoriz.selected)
+				{
+					m_done = readPixels(bmpd);
+				}
+				else
+				{
+					m_done = readPixelsSquare(bmpd);	
+				}
+			}
+			
+			private function startProcess(finish:Boolean = false):void
+			{
+				m_pixelsPerImage = Number(pixelPerImage.text);
+				m_squaresPerLine = Math.floor(m_finalImage.width/m_pixelsPerImage);
+				while (!m_done)
+				{
+					var data:Object = m_toLoad[m_curImageIndex];
+					if (data.bmpd)
+					{
+						process(data.bmpd);
+					}
+					m_curImageIndex++;
+					if (m_curImageIndex>=m_toLoad.length)
+					{
+						m_curImageIndex = 0;
+					}
+				}
+				image.source = m_finalImage;
+				saveButton.enabled = true;
+			}
+			
+			private function logger(text:String):void
+			{
+				m_utils.scrollToBottom(log);
+				log.text += "\n"+text;
+				m_utils.scrollToBottom(log);
+			}
+			
+			private function onDimChange():void
+			{
+				if (widthInput.text!="" && heightInput.text!="")
+				{
+					runButton.enabled = true;
+				}
+			}
+			
+			private function saveImage():void
+			{
+				var file:File = new File();
+				file.browseForSave("Save As");
+				file.addEventListener(Event.SELECT, function(ev:Event):void{
+					var stream:FileStream = new FileStream();
+					stream.open(file, FileMode.WRITE);
+					var jpg:PNGEncoder = new PNGEncoder();
+					stream.writeBytes(jpg.encode(m_finalImage));
+					stream.close();
+				});
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:VGroup>
+		<s:TextInput id="sourceLabel" width="500" text="/Users/applicaster/desktop/1"/>
+		<s:VGroup>
+			<s:HGroup>
+				<s:HGroup>
+					<s:Label text="Pixel #:"/>
+					<s:TextInput id="pixelPerImage" text="4"/>
+				</s:HGroup>
+				<s:HGroup>
+					<s:Label text="Mode:"/>
+					<s:HGroup>
+						<s:RadioButton label="Horizontal" id="m_modeHoriz" groupName="mode" selected="true"/>
+						<s:RadioButton label="Square" id="m_modeSquare" groupName="mode" selected="false"/>
+					</s:HGroup>
+				</s:HGroup>
+			</s:HGroup>
+			<s:CheckBox label="Centered" id="m_centered" selected="false"/>
+			<s:HGroup>
+				<s:Label text="Ancho:"/>
+				<s:TextInput id="widthInput" change="onDimChange();" text="100"/>
+			</s:HGroup>
+			<s:HGroup>
+				<s:Label text="Altura:"/>
+				<s:TextInput id="heightInput" change="onDimChange();" text="100"/>
+			</s:HGroup>
+			<s:Button id="saveButton" label="Guardar Imagen" click="saveImage();" enabled="false"/>
+			<s:Button label="RUN" id="runButton" click="run();"/>
+		</s:VGroup>
+		<s:Image id="image"/>
+		<s:TextArea width="100%" height="100%" id="log"/>
+	</s:VGroup>
+</s:WindowedApplication>
